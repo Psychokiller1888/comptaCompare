@@ -30,8 +30,8 @@ def isFloat(string: str) -> bool:
 		return False
 
 
-abacusExports = abacusExportDir.glob('*.xlsx')
-bankExports = bankExportDir.glob('*.xlsx')
+abacusExports = abacusExportDir.glob('[!~]*.xlsx')
+bankExports = bankExportDir.glob('[!~]*.xlsx')
 
 questions = [
 	{
@@ -142,6 +142,7 @@ elif linesRaiffeisen < linesAbacus:
 print(f'-- Raiffeisen lines: {linesRaiffeisen}')
 print(f'-- Abacus lines: {linesAbacus}')
 
+startComputedDiff = 0
 if startSaldoRaiffeisen != startSaldoAbacus:
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
 		print(f'\n- Starting saldo are not the same, applying known difference to Abacus start saldo')
@@ -151,15 +152,16 @@ if startSaldoRaiffeisen != startSaldoAbacus:
 		else:
 			print(f'-- After applying {answers["knownDifference"]} to Abacus start saldo, the account start saldo match!')
 	else:
+		startComputedDiff = startSaldoAbacus - startSaldoRaiffeisen
 		print(f'\n- Starting saldo are not the same, did you already correct the month before?')
 else:
 	print(f'\n- Starting saldo are matching, previous months are ok!')
 
-print(f'-- Raiffeisen start saldo: {startSaldoRaiffeisen}')
-print(f'-- Abacus start saldo: {startSaldoAbacus}')
+print(f'-- Raiffeisen start saldo: {round(startSaldoRaiffeisen, 2)}')
+print(f'-- Abacus start saldo: {round(startSaldoAbacus, 2)}')
 
-print(f'\n-- Raiffeisen end saldo: {endSaldoRaiffeisen}')
-print(f'-- Abacus end saldo: {endSaldoAbacus}')
+print(f'\n-- Raiffeisen end saldo: {round(endSaldoRaiffeisen, 2)}')
+print(f'-- Abacus end saldo: {round(endSaldoAbacus, 2)}')
 
 if endSaldoRaiffeisen != endSaldoAbacus:
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
@@ -170,7 +172,12 @@ if endSaldoRaiffeisen != endSaldoAbacus:
 		else:
 			print(f'- After applying {answers["knownDifference"]} to Abacus end saldo, the account saldo match!')
 	else:
-		print(f'\n- Ending saldo are not the same, you have work to do!')
+		print(f'\n- Ending saldo are not the same')
+		if startComputedDiff != 0:
+			if round(endSaldoAbacus - startComputedDiff, 2) == round(endSaldoRaiffeisen, 2):
+				print(f'-- If you correct the starting saldo, meaning correct the past months and find the {startComputedDiff} difference, the end saldo would match')
+			else:
+				print(f'-- Even after applying the start difference of {startComputedDiff}, the saldo don\'t match, something is wrong')
 else:
 	print(f'\n- Ending saldo are matching, so far so good!')
 
