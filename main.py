@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -55,7 +56,7 @@ questions = [
 	{
 		'type': 'input',
 		'name': 'knownDifference',
-		'message': 'Please input the difference to apply on the Abacus end saldo of the previous month',
+		'message': 'Please input the difference to apply on the Abacus end balance of the previous month',
 		'validate': lambda val: isFloat(val),
 		'when': lambda ans: 'knownDifferenceQuestion' in ans and ans['knownDifferenceQuestion']
 	}
@@ -70,46 +71,58 @@ abacusFile = open(Path(abacusExportDir, f'{answers["abacusFile"]}.xlsx'), mode='
 
 print('\nAnalyzing Abacus...')
 workbook = load_workbook(filename=abacusFile)
-endSaldoAbacus = 0
+endBalanceAbacus = 0
 abacusCredits = dict()
 abacusDebits = dict()
 linesAbacus = 0
 sheet = workbook.active
 
-startSaldoAbacus = sheet['I4'].value
+startBalanceAbacus = sheet['I4'].value
 
-prevSaldo = 0
+prevBalance = 0
 for row in sheet.rows:
 	row0 = str(row[0].value)
 	if MATCH_DATE.match(row0):
 		date = row0
 		if row[6].value is not None:
 			abacusDebits.setdefault(date, list())
+			if float(row[6].value) in abacusDebits[date]:
+				print(f'- {date} Potential debits double entry: {float(row[6].value)}')
 			abacusDebits[date].append(float(row[6].value))
 			linesAbacus += 1
-			prevSaldo = row[8].value
+			prevBalance = row[8].value
 		elif row[7].value is not None:
 			abacusCredits.setdefault(date, list())
+			if float(row[7].value) in abacusCredits[date]:
+				print(f'- {date} Potential credit double entry: {float(row[7].value)}')
 			abacusCredits[date].append(float(row[7].value))
 			linesAbacus += 1
-			prevSaldo = row[8].value
+			prevBalance = row[8].value
 
 	elif row0.startswith('Solde') and row0 != 'Solde y.c. report':
-		endSaldoAbacus = prevSaldo
+		endBalanceAbacus = prevBalance
 		break
+
+Path('logs/abacusDebits.json').write_text(json.dumps(abacusDebits, ensure_ascii=False, indent='\t'))
+Path('logs/abacusCredits.json').write_text(json.dumps(abacusCredits, ensure_ascii=False, indent='\t'))
 
 print('\nAnalyzing Raiffeisen...')
 bankCredits = dict()
 bankDebits = dict()
-endSaldoRaiffeisen = 0
+endBalanceRaiffeisen = 0
 linesRaiffeisen = 0
-bankFile = open(Path(bankExportDir, f'{answers["bankFile"]}.xlsx'), mode='rb')
+
+bankFilePath = Path(bankExportDir, f'{answers["bankFile"]}.xlsx')
+bankFile = open(bankFilePath, mode='rb')
 workbook = load_workbook(filename=bankFile)
 sheet = workbook.active
 
-startSaldoRaiffeisen = sheet['E2'].value - sheet['D2'].value if sheet['E2'].value > 0 else sheet['E2'].value + sheet['D2'].value
+startBalanceRaiffeisen = sheet['E2'].value - sheet['D2'].value if sheet['E2'].value > 0 else sheet['E2'].value + sheet['D2'].value
 for row in sheet.rows:
-	if row[0].value.lower() == 'iban':
+	try:
+		if row[0].value.lower() == 'iban':
+			continue
+	except:
 		continue
 
 	date = row[1].value
@@ -130,7 +143,10 @@ for row in sheet.rows:
 		bankCredits[date].append(float(row[3].value))
 		linesRaiffeisen += 1
 
-	endSaldoRaiffeisen = float(row[4].value)
+	endBalanceRaiffeisen = float(row[4].value)
+
+Path('logs/bankDebits.json').write_text(json.dumps(bankDebits, ensure_ascii=False, indent='\t'))
+Path('logs/bankCredits.json').write_text(json.dumps(bankCredits, ensure_ascii=False, indent='\t'))
 
 print('\nDocument analyze done!')
 
@@ -143,50 +159,51 @@ print(f'-- Raiffeisen lines: {linesRaiffeisen}')
 print(f'-- Abacus lines: {linesAbacus}')
 
 startComputedDiff = 0
-if startSaldoRaiffeisen != startSaldoAbacus:
+if startBalanceRaiffeisen != startBalanceAbacus:
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
-		print(f'\n- Starting saldo are not the same, applying known difference to Abacus start saldo')
-		startSaldoAbacus += float(answers['knownDifference'])
-		if startSaldoRaiffeisen != startSaldoAbacus:
-			print(f'-- Even after applying {answers["knownDifference"]} to Abacus start saldo, saldo are not matching, did you correct the month before?')
+		print(f'\n- Starting balances are not the same, applying known difference to Abacus start balance')
+		startBalanceAbacus += float(answers['knownDifference'])
+		if startBalanceRaiffeisen != startBalanceAbacus:
+			print(f'-- Even after applying {answers["knownDifference"]} to Abacus start balance, balances are not matching, did you correct the month before?')
 		else:
-			print(f'-- After applying {answers["knownDifference"]} to Abacus start saldo, the account start saldo match!')
+			print(f'-- After applying {answers["knownDifference"]} to Abacus start balance, the account start balance match!')
 	else:
-		startComputedDiff = startSaldoAbacus - startSaldoRaiffeisen
-		print(f'\n- Starting saldo are not the same, did you already correct the month before?')
+		startComputedDiff = startBalanceAbacus - startBalanceRaiffeisen
+		print(f'\n- Starting balances are not the same, did you already correct the month before?')
 else:
-	print(f'\n- Starting saldo are matching, previous months are ok!')
+	print(f'\n- Starting balances are matching, previous months are ok!')
 
-print(f'-- Raiffeisen start saldo: {round(startSaldoRaiffeisen, 2)}')
-print(f'-- Abacus start saldo: {round(startSaldoAbacus, 2)}')
+print(f'-- Raiffeisen start balance: {round(startBalanceRaiffeisen, 2)}')
+print(f'-- Abacus start balance: {round(startBalanceAbacus, 2)}')
 
-print(f'\n-- Raiffeisen end saldo: {round(endSaldoRaiffeisen, 2)}')
-print(f'-- Abacus end saldo: {round(endSaldoAbacus, 2)}')
+print(f'\n-- Raiffeisen end balance: {round(endBalanceRaiffeisen, 2)}')
+print(f'-- Abacus end balance: {round(endBalanceAbacus, 2)}')
 
-if endSaldoRaiffeisen != endSaldoAbacus:
+if endBalanceRaiffeisen != endBalanceAbacus:
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
-		print(f'- End saldo are not the same, applying known difference to Abacus end saldo')
-		endSaldoAbacus += float(answers['knownDifference'])
-		if endSaldoRaiffeisen != endSaldoAbacus:
-			print(f'- Even after applying {answers["knownDifference"]} to Abacus end saldo, saldo are not matching, you got work to do!')
+		print(f'- End balances are not the same, applying known difference to Abacus end balance')
+		endBalanceAbacus += float(answers['knownDifference'])
+		if endBalanceRaiffeisen != endBalanceAbacus:
+			print(f'- Even after applying {answers["knownDifference"]} to Abacus end balance, balances are not matching, you got work to do!')
 		else:
-			print(f'- After applying {answers["knownDifference"]} to Abacus end saldo, the account saldo match!')
+			print(f'- After applying {answers["knownDifference"]} to Abacus end balance, the account balance match!')
 	else:
-		print(f'\n- Ending saldo are not the same')
+		print(f'\n- Ending balances are not the same')
 		if startComputedDiff != 0:
-			if round(endSaldoAbacus - startComputedDiff, 2) == round(endSaldoRaiffeisen, 2):
-				print(f'-- If you correct the starting saldo, meaning correct the past months and find the {startComputedDiff} difference, the end saldo would match')
+			if round(endBalanceAbacus - startComputedDiff, 2) == round(endBalanceRaiffeisen, 2):
+				print(f'-- If you correct the starting balance, meaning correct the past months and find the {startComputedDiff} difference, the end balance would match')
 			else:
-				print(f'-- Even after applying the start difference of {startComputedDiff}, the saldo don\'t match, something is wrong')
+				print(f'-- Even after applying the start difference of {startComputedDiff}, the balance don\'t match, something is wrong')
 else:
-	print(f'\n- Ending saldo are matching, so far so good!')
+	print(f'\n- Ending balances are matching, so far so good!')
 
 
 
 print('\nMatching Raiffeisen credits to Abacus debits...')
 
 notFoundBankCredits = list()
-potentialEndSaldoCorrection = 0
+potentialEndBalanceCorrection = 0
+missingCreditsCount = 0
 for date, amounts in bankCredits.copy().items():
 	for amount in amounts:
 		found = False
@@ -199,16 +216,21 @@ for date, amounts in bankCredits.copy().items():
 			if found:
 				break
 		if not found:
-			print(f'- Crédit Raiffeisen de {amount} CHF du {date} non trouvé dans les écritures Abacus')
-			potentialEndSaldoCorrection += amount
+			print(f'- Raiffeisen credit of {amount} CHF on {date} not found in Abacus')
+			missingCreditsCount += 1
+			potentialEndBalanceCorrection += amount
 			notFoundBankCredits.append(amount)
 
-if potentialEndSaldoCorrection > 0:
-	print(f'\n-- Applying potential correction, new end saldo on Abacus: {round(endSaldoAbacus + potentialEndSaldoCorrection)}')
+if missingCreditsCount > 0:
+	print(f'\n{missingCreditsCount} missing credits in Abacus')
+
+if potentialEndBalanceCorrection > 0:
+	print(f'\n-- Applying potential correction, new end balance on Abacus: {round(endBalanceAbacus + potentialEndBalanceCorrection)}')
 
 
 print('\nMatching Raiffeisen debits to Abacus credits...')
 notFoundBankDebits = list()
+missingDebitsCount = 0
 for date, amounts in bankDebits.copy().items():
 	for amount in amounts:
 		found = False
@@ -216,20 +238,24 @@ for date, amounts in bankDebits.copy().items():
 			for abacusAmount in abacusAmounts.copy():
 				if amount == abacusAmount:
 					found = True
-					abacusCredits[abacusDate].remove(abacusAmount)
+					abacusCredits[abacusDate].remove(amount)
 					break
 			if found:
 				break
 		if not found:
-			print(f'- Débit Raiffeisen de {amount} CHF du {date} non trouvé dans les écritures Abacus')
-			potentialEndSaldoCorrection -= amount
+			print(f'- Raiffeisen dedit of {amount} CHF on {date} not found in Abacus')
+			missingDebitsCount += 1
+			potentialEndBalanceCorrection -= amount
 			notFoundBankDebits.append(amount)
 
-newPotentialAbacusSaldo = endSaldoAbacus
-if potentialEndSaldoCorrection != 0:
-	newPotentialAbacusSaldo = round(endSaldoAbacus + potentialEndSaldoCorrection, 2)
-	print(f'\n-- Applying potential correction, new end saldo on Abacus: {newPotentialAbacusSaldo}')
-	if newPotentialAbacusSaldo == endSaldoRaiffeisen:
+if missingDebitsCount > 0:
+	print(f'\n{missingDebitsCount} missing debits in Abacus')
+
+newPotentialAbacusBalance = endBalanceAbacus
+if potentialEndBalanceCorrection != 0:
+	newPotentialAbacusBalance = round(endBalanceAbacus + potentialEndBalanceCorrection, 2)
+	print(f'\n-- Applying potential correction, new end balance on Abacus: {newPotentialAbacusBalance}')
+	if newPotentialAbacusBalance == endBalanceRaiffeisen:
 		print('--- Correcting missing parts would fix the account and bring it to same level as the bank!')
 	else:
 		print("--- Applying corrections does not fix the account, there's something else...")
@@ -261,16 +287,23 @@ for date, listing in abacusDebits.items():
 
 if correction != 0:
 	print('\n-- Adding non matched credits and removing non matched debits...')
-	result = round(newPotentialAbacusSaldo + correction, 2)
-	print(f'--- Calculated result on Abacus account: {result} {f"(should be {endSaldoRaiffeisen})" if result != endSaldoRaiffeisen else ""}')
-	if result == endSaldoRaiffeisen:
+	result = round(newPotentialAbacusBalance + correction, 2)
+	print(f'--- Calculated result on Abacus account: {result} {f"(should be {endBalanceRaiffeisen})" if result != endBalanceRaiffeisen else "and that IS A MATCH, we rock!"}')
+	if result == endBalanceRaiffeisen:
+		print('---- To fix the balances you should:')
+		if missingDebitsCount > 0:
+			print(f'----- Apply the {missingDebitsCount} missing debits')
+
+		if missingCreditsCount > 0:
+			print(f'----- Apply the {missingCreditsCount} missing credits')
+
 		if inverseAbacusCredits:
-			print(f'---- Inverse the following entrie(s) to match the accounts: {", ".join(inverseAbacusCredits)}')
+			print(f'----- Inverse the following entrie(s) to match the accounts: {", ".join(inverseAbacusCredits)}')
 
 		if inverseAbacusDebits:
-			print(f'---- Inverse the following entrie(s) to match the accounts: {", ".join(inverseAbacusDebits)}')
+			print(f'----- Inverse the following entrie(s) to match the accounts: {", ".join(inverseAbacusDebits)}')
 
 		if removeFromAbacus:
-			print(f'---- Remove the following entrie(s) to match the accounts: {", ".join(removeFromAbacus)}')
+			print(f'----- Remove the following entrie(s) to match the accounts: {", ".join(removeFromAbacus)}')
 	else:
 		print('--- Accounts not matching, something else is wrong...')
