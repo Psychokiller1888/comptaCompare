@@ -1,5 +1,6 @@
 import json
 import re
+from datetime import datetime
 from pathlib import Path
 
 from PyInquirer import prompt
@@ -103,6 +104,8 @@ for row in sheet.rows:
 		endBalanceAbacus = prevBalance
 		break
 
+Path('logs/abacusDebits.json').touch()
+Path('logs/abacusCredits.json').touch()
 Path('logs/abacusDebits.json').write_text(json.dumps(abacusDebits, ensure_ascii=False, indent='\t'))
 Path('logs/abacusCredits.json').write_text(json.dumps(abacusCredits, ensure_ascii=False, indent='\t'))
 
@@ -117,7 +120,7 @@ bankFile = open(bankFilePath, mode='rb')
 workbook = load_workbook(filename=bankFile)
 sheet = workbook.active
 
-startBalanceRaiffeisen = sheet['E2'].value - sheet['D2'].value if sheet['E2'].value > 0 else sheet['E2'].value + sheet['D2'].value
+startBalanceRaiffeisen = float(sheet['E2'].value) - float(sheet['D2'].value) if float(sheet['E2'].value) > 0 else float(sheet['E2'].value) + float(sheet['D2'].value)
 for row in sheet.rows:
 	try:
 		if row[0].value.lower() == 'iban':
@@ -125,25 +128,29 @@ for row in sheet.rows:
 	except:
 		continue
 
-	date = row[1].value
+	#date = row[1].value[0:9].replace('-', '.')
 
 	try:
-		date = date.strftime('%d.%m.%y')
-	except:
+		date = row[1].value.strftime('%d.%m.%y')
+	except Exception as e:
+		print(f'Error: {e}')
 		continue
 
-	if row[3].value == 0:
+	if float(str(row[3].value)) == 0:
 		continue
-	elif row[3].value < 1:
+	elif float(str(row[3].value)) < 1:
 		bankDebits.setdefault(date, list())
 		bankDebits[date].append(abs(float(row[3].value)))
 		linesRaiffeisen += 1
 	else:
 		bankCredits.setdefault(date, list())
-		bankCredits[date].append(float(row[3].value))
+		bankCredits[date].append(float(str(row[3].value)))
 		linesRaiffeisen += 1
 
-	endBalanceRaiffeisen = float(row[4].value)
+	endBalanceRaiffeisen = float(str(row[4].value))
+
+Path('logs/bankDebits.json').touch()
+Path('logs/bankCredits.json').touch()
 
 Path('logs/bankDebits.json').write_text(json.dumps(bankDebits, ensure_ascii=False, indent='\t'))
 Path('logs/bankCredits.json').write_text(json.dumps(bankCredits, ensure_ascii=False, indent='\t'))
