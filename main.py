@@ -188,12 +188,13 @@ print(f'-- Abacus end balance: {round(endBalanceAbacus, 2)}')
 
 if endBalanceRaiffeisen != endBalanceAbacus:
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
-		print(f'- End balances are not the same, applying known difference to Abacus end balance')
+		print(f'-- End balances are not the same, applying known difference to Abacus end balance')
 		endBalanceAbacus += float(answers['knownDifference'])
 		if endBalanceRaiffeisen != endBalanceAbacus:
-			print(f'- Even after applying {answers["knownDifference"]} to Abacus end balance, balances are not matching, you got work to do!')
+			print(f'--- Even after applying {answers["knownDifference"]} to Abacus end balance, balances are not matching, you got work to do!')
 		else:
-			print(f'- After applying {answers["knownDifference"]} to Abacus end balance, the account balance match!')
+			print(f'--- After applying {answers["knownDifference"]} to Abacus end balance, the account balance match, so we\'re all good!')
+			exit(0)
 	else:
 		print(f'\n- Ending balances are not the same')
 		if startComputedDiff != 0:
