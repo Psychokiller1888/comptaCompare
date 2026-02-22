@@ -138,7 +138,7 @@ for row in sheet.rows:
 
 	if float(str(row[3].value)) == 0:
 		continue
-	elif float(str(row[3].value)) < 1:
+	elif float(str(row[3].value)) < 0:
 		bankDebits.setdefault(date, list())
 		bankDebits[date].append(abs(float(row[3].value)))
 		linesRaiffeisen += 1
