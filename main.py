@@ -186,12 +186,13 @@ print(f'-- Abacus start balance: {round(startBalanceAbacus, 2)}')
 print(f'\n-- Raiffeisen end balance: {round(endBalanceRaiffeisen, 2)}')
 print(f'-- Abacus end balance: {round(endBalanceAbacus, 2)}')
 
-if endBalanceRaiffeisen != endBalanceAbacus:
+if round(endBalanceRaiffeisen, 2) != round(endBalanceAbacus, 2):
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
 		print(f'-- End balances are not the same, applying known difference to Abacus end balance')
 		endBalanceAbacus += float(answers['knownDifference'])
-		if endBalanceRaiffeisen != endBalanceAbacus:
+		if round(endBalanceRaiffeisen, 2) != round(endBalanceAbacus, 2):
 			print(f'--- Even after applying {answers["knownDifference"]} to Abacus end balance, balances are not matching, you got work to do!')
+			print(f'---- Recalculated Abacus end balance {endBalanceAbacus}, Raiffeisen end balance {endBalanceRaiffeisen}')
 		else:
 			print(f'--- After applying {answers["knownDifference"]} to Abacus end balance, the account balance match, so we\'re all good!')
 			exit(0)
@@ -199,7 +200,7 @@ if endBalanceRaiffeisen != endBalanceAbacus:
 		print(f'\n- Ending balances are not the same')
 		if startComputedDiff != 0:
 			if round(endBalanceAbacus - startComputedDiff, 2) == round(endBalanceRaiffeisen, 2):
-				print(f'-- If you correct the starting balance, meaning correct the past months and find the {startComputedDiff} difference, the end balance would match')
+				print(f'-- If you correct the starting balance, meaning correct the past months and find the {round(startComputedDiff, 2)} difference, the end balance would match')
 			else:
 				print(f'-- Even after applying the start difference of {startComputedDiff}, the balance don\'t match, something is wrong')
 else:
