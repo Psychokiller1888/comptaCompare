@@ -166,11 +166,11 @@ print(f'-- Raiffeisen lines: {linesRaiffeisen}')
 print(f'-- Abacus lines: {linesAbacus}')
 
 startComputedDiff = 0
-if startBalanceRaiffeisen != startBalanceAbacus:
+if round(startBalanceRaiffeisen, 2) != round(startBalanceAbacus, 2):
 	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
 		print(f'\n- Starting balances are not the same, applying known difference to Abacus start balance')
 		startBalanceAbacus += float(answers['knownDifference'])
-		if startBalanceRaiffeisen != startBalanceAbacus:
+		if round(startBalanceRaiffeisen, 2) != round(startBalanceAbacus, 2):
 			print(f'-- Even after applying {answers["knownDifference"]} to Abacus start balance, balances are not matching, did you correct the month before?')
 		else:
 			print(f'-- After applying {answers["knownDifference"]} to Abacus start balance, the account start balance match!')
@@ -297,7 +297,7 @@ for date, listing in abacusDebits.items():
 if correction != 0:
 	print('\n-- Adding non matched credits and removing non matched debits...')
 	result = round(newPotentialAbacusBalance + correction, 2)
-	print(f'--- Calculated result on Abacus account: {result} {f"(should be {endBalanceRaiffeisen})" if result != endBalanceRaiffeisen else "and that IS A MATCH, we rock!"}')
+	print(f'--- Calculated result on Abacus account: {result} {f"(should be {endBalanceRaiffeisen}, difference {round(result - endBalanceRaiffeisen, 2)})" if result != endBalanceRaiffeisen else "and that IS A MATCH, we rock!"}')
 	if result == endBalanceRaiffeisen:
 		print('---- To fix the balances you should:')
 		if missingDebitsCount > 0:
