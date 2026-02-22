@@ -250,7 +250,7 @@ for date, amounts in bankDebits.copy().items():
 			if found:
 				break
 		if not found:
-			print(f'- Raiffeisen dedit of {amount} CHF on {date} not found in Abacus')
+			print(f'- Raiffeisen debit of {amount} CHF on {date} not found in Abacus')
 			missingDebitsCount += 1
 			potentialEndBalanceCorrection -= amount
 			notFoundBankDebits.append(amount)
