@@ -7,33 +7,50 @@ from PyInquirer import prompt
 from openpyxl import load_workbook
 
 MATCH_DATE = re.compile(r'^[\d]{2}\.[\d]{2}\.[\d]{4}$')
-#MATCH_RAIFFEISEN = re.compile(r"(?P<date>[\d]{2}\.[\d]{2}\.[\d]{2}).*?(?P<type>Crédit|Ordre|Système de recouvrement direct|Versement).*?(?P<amount>[0-9']+\.[0-9]{2}) (?P<solde>[0-9']+\.[0-9]{2})$")
-#MATCH_ABACUS = re.compile(r"(?P<date>[\d]{2}\.[\d]{2}\.[\d]{4}).*?(?P<amount>[0-9']+\.[0-9]{2}) (?P<solde>[0-9']+\.[0-9]{2})")
-#MATCH_ABACUS_START_SOLDE = re.compile(r"Solde y\.c\. report (?P<startSolde>[\d']+\.[\d]{2})")
-#MATCH_RAIFFEISEN_START_SOLDE = re.compile(r"Report de solde (?P<startSolde>[\d']+\.[\d]{2})")
-#MATCH_RAIFFEISEN_END_SOLDE = re.compile(r"Solde en votre faveur.*?(?P<endSolde>[\d']+\.[\d]{2})")
 
 abacusExportDir = Path('abacusExports')
 bankExportDir = Path('bankExports')
+logsDir = Path('logs')
+
+
+def ensureDirs() -> None:
+	abacusExportDir.mkdir(parents=True, exist_ok=True)
+	bankExportDir.mkdir(parents=True, exist_ok=True)
+	logsDir.mkdir(parents=True, exist_ok=True)
 
 
 def parseMoney(string: str) -> float:
-	try:
-		return float(string.replace("'", '').strip())
-	except:
-		raise
+	# support "123'456.78" and "123456.78" and "123456,78"
+	s = str(string).replace("'", '').replace(' ', '').strip()
+	s = s.replace(',', '.')
+	return float(s)
 
 
 def isFloat(string: str) -> bool:
 	try:
-		float(string)
+		parseMoney(string)
 		return True
-	except:
+	except Exception:
 		return False
 
 
+def safeRound(value) -> float:
+	# round floats and numeric strings safely
+	return round(parseMoney(value), 2)
+
+
+ensureDirs()
+
 abacusExports = list(abacusExportDir.glob('[!~]*.xlsx'))
 bankExports = list(bankExportDir.glob('[!~]*.xlsx'))
+
+if not abacusExports:
+	print('No Abacus exports found in abacusExports/')
+	exit(1)
+
+if not bankExports:
+	print('No bank exports found in bankExports/')
+	exit(1)
 
 questions = [
 	{
@@ -68,88 +85,113 @@ answers = prompt(questions=questions)
 if not answers:
 	exit(1)
 
-abacusFile = open(Path(abacusExportDir, f'{answers["abacusFile"]}.xlsx'), mode='rb')
+knownDifference = 0.0
+if 'knownDifference' in answers and answers['knownDifference'] is not None:
+	knownDifference = parseMoney(answers['knownDifference'])
+
+# -------------------------
+# Analyzing Abacus
+# -------------------------
+abacusPath = Path(abacusExportDir, f'{answers["abacusFile"]}.xlsx')
 
 print('\nAnalyzing Abacus...')
-workbook = load_workbook(filename=abacusFile)
-endBalanceAbacus = 0
+workbook = load_workbook(filename=str(abacusPath), data_only=True)
+sheet = workbook.active
+
+endBalanceAbacus = 0.0
 abacusCredits = dict()
 abacusDebits = dict()
 linesAbacus = 0
-sheet = workbook.active
 
 startBalanceAbacus = sheet['I4'].value
 if startBalanceAbacus is None:
-	startBalanceAbacus = 0
+	startBalanceAbacus = 0.0
 else:
-	startBalanceAbacus = round(float(startBalanceAbacus), 2)
+	startBalanceAbacus = safeRound(startBalanceAbacus)
 
-prevBalance = 0
+prevBalance = 0.0
+
 for row in sheet.rows:
-	row0 = str(row[0].value)
+	row0 = '' if row[0].value is None else str(row[0].value)
+
 	if MATCH_DATE.match(row0):
 		date = row0
 		debit = row[6].value
 		credit = row[7].value
+
+		# On garde exactement ta logique:
+		# - si debit pas None => debit
+		# - elif credit pas None => credit
 		if debit is not None:
-			# noinspection DuplicatedCode
-			debit = round(float(debit), 2)
+			debit = safeRound(debit)
 			abacusDebits.setdefault(date, list())
 			if debit in abacusDebits[date]:
 				print(f'- {date} Potential debits double entry: {debit}')
 			abacusDebits[date].append(debit)
 			linesAbacus += 1
-			prevBalance = row[8].value
+			if row[8].value is not None:
+				prevBalance = safeRound(row[8].value)
+
 		elif credit is not None:
-			# noinspection DuplicatedCode
-			credit = round(float(credit), 2)
+			credit = safeRound(credit)
 			abacusCredits.setdefault(date, list())
 			if credit in abacusCredits[date]:
 				print(f'- {date} Potential credit double entry: {credit}')
 			abacusCredits[date].append(credit)
 			linesAbacus += 1
-			prevBalance = row[8].value
+			if row[8].value is not None:
+				prevBalance = safeRound(row[8].value)
 
 	elif row0.startswith('Solde') and row0 != 'Solde y.c. report':
 		endBalanceAbacus = prevBalance
 		break
 
-endBalanceAbacus = round(float(endBalanceAbacus), 2)
+endBalanceAbacus = safeRound(endBalanceAbacus)
 
-Path('logs/abacusDebits.json').touch()
-Path('logs/abacusCredits.json').touch()
-Path('logs/abacusDebits.json').write_text(json.dumps(abacusDebits, ensure_ascii=False, indent='\t'))
-Path('logs/abacusCredits.json').write_text(json.dumps(abacusCredits, ensure_ascii=False, indent='\t'))
+(logsDir / 'abacusDebits.json').write_text(json.dumps(abacusDebits, ensure_ascii=False, indent='\t'))
+(logsDir / 'abacusCredits.json').write_text(json.dumps(abacusCredits, ensure_ascii=False, indent='\t'))
 
+# -------------------------
+# Analyzing Raiffeisen
+# -------------------------
 print('\nAnalyzing Raiffeisen...')
 bankCredits = dict()
 bankDebits = dict()
-endBalanceRaiffeisen = 0
+endBalanceRaiffeisen = 0.0
 linesRaiffeisen = 0
 
 bankFilePath = Path(bankExportDir, f'{answers["bankFile"]}.xlsx')
-bankFile = open(bankFilePath, mode='rb')
-workbook = load_workbook(filename=bankFile)
+workbook = load_workbook(filename=str(bankFilePath), data_only=True)
 sheet = workbook.active
 
-startBalanceRaiffeisen = float(sheet['E2'].value) - float(sheet['D2'].value) if float(sheet['E2'].value) > 0 else float(sheet['E2'].value) + float(sheet['D2'].value)
-startBalanceRaiffeisen = round(startBalanceRaiffeisen, 2)
+# Ta formule, mais safe:
+e2 = sheet['E2'].value or 0
+d2 = sheet['D2'].value or 0
+e2 = parseMoney(e2)
+d2 = parseMoney(d2)
+
+startBalanceRaiffeisen = e2 - d2 if e2 > 0 else e2 + d2
+startBalanceRaiffeisen = safeRound(startBalanceRaiffeisen)
+
 for row in sheet.rows:
 	try:
-		if row[0].value.lower() == 'iban':
+		if row[0].value and str(row[0].value).lower() == 'iban':
 			continue
-	except:
+	except Exception:
 		continue
-
-	#date = row[1].value[0:9].replace('-', '.')
 
 	try:
 		date = row[1].value.strftime('%d.%m.%Y')
 	except Exception as e:
+		# On garde ton print d'erreur
 		print(f'Error: {e}')
 		continue
 
-	data = round(float(str(row[3].value)), 2)
+	try:
+		data = safeRound(row[3].value)
+	except Exception:
+		continue
+
 	if data == 0:
 		continue
 	elif data < 0:
@@ -161,13 +203,14 @@ for row in sheet.rows:
 		bankCredits[date].append(data)
 		linesRaiffeisen += 1
 
-	endBalanceRaiffeisen = round(float(str(row[4].value)), 2)
+	# colonne solde banque (row[4]) comme tu fais
+	try:
+		endBalanceRaiffeisen = safeRound(row[4].value)
+	except Exception:
+		pass
 
-Path('logs/bankDebits.json').touch()
-Path('logs/bankCredits.json').touch()
-
-Path('logs/bankDebits.json').write_text(json.dumps(bankDebits, ensure_ascii=False, indent='\t'))
-Path('logs/bankCredits.json').write_text(json.dumps(bankCredits, ensure_ascii=False, indent='\t'))
+(logsDir / 'bankDebits.json').write_text(json.dumps(bankDebits, ensure_ascii=False, indent='\t'))
+(logsDir / 'bankCredits.json').write_text(json.dumps(bankCredits, ensure_ascii=False, indent='\t'))
 
 print('\nDocument analyze done!')
 
@@ -179,15 +222,15 @@ elif linesRaiffeisen < linesAbacus:
 print(f'-- Raiffeisen lines: {linesRaiffeisen}')
 print(f'-- Abacus lines: {linesAbacus}')
 
-startComputedDiff = 0
+startComputedDiff = 0.0
 if startBalanceRaiffeisen != startBalanceAbacus:
-	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
+	if knownDifference != 0:
 		print(f'\n- Starting balances are not the same, applying known difference to Abacus start balance')
-		startBalanceAbacus = round(startBalanceAbacus + float(answers['knownDifference']), 2)
+		startBalanceAbacus = safeRound(startBalanceAbacus + knownDifference)
 		if startBalanceRaiffeisen != startBalanceAbacus:
-			print(f'-- Even after applying {answers["knownDifference"]} to Abacus start balance, balances are not matching, did you correct the month before?')
+			print(f'-- Even after applying {knownDifference} to Abacus start balance, balances are not matching, did you correct the month before?')
 		else:
-			print(f'-- After applying {answers["knownDifference"]} to Abacus start balance, the account start balance match!')
+			print(f'-- After applying {knownDifference} to Abacus start balance, the account start balance match!')
 	else:
 		startComputedDiff = startBalanceAbacus - startBalanceRaiffeisen
 		print(f'\n- Starting balances are not the same, did you already correct the month before?')
@@ -201,45 +244,46 @@ print(f'\n-- Raiffeisen end balance: {endBalanceRaiffeisen}')
 print(f'-- Abacus end balance: {endBalanceAbacus}')
 
 if endBalanceRaiffeisen != endBalanceAbacus:
-	if 'knownDifference' in answers and float(answers['knownDifference']) != 0:
+	if knownDifference != 0:
 		print(f'-- End balances are not the same, applying known difference to Abacus end balance')
-		endBalanceAbacus = round(endBalanceAbacus + float(answers['knownDifference']), 2)
+		endBalanceAbacus = safeRound(endBalanceAbacus + knownDifference)
 		if endBalanceRaiffeisen != endBalanceAbacus:
-			print(f'--- Even after applying {answers["knownDifference"]} to Abacus end balance, balances are not matching, you got work to do!')
+			print(f'--- Even after applying {knownDifference} to Abacus end balance, balances are not matching, you got work to do!')
 			print(f'---- Recalculated Abacus end balance {endBalanceAbacus}, Raiffeisen end balance {endBalanceRaiffeisen}')
 		else:
-			print(f'--- After applying {answers["knownDifference"]} to Abacus end balance, the account balance match, so we\'re all good!')
+			print(f'--- After applying {knownDifference} to Abacus end balance, the account balance match, so we\'re all good!')
 			exit(0)
 	else:
 		print(f'\n- Ending balances are not the same')
 		if startComputedDiff != 0:
-			if endBalanceAbacus - startComputedDiff == endBalanceRaiffeisen:
-				print(f'-- If you correct the starting balance, meaning correct the past months and find the {round(startComputedDiff, 2)} difference, the end balance would match')
+			if safeRound(endBalanceAbacus - startComputedDiff) == endBalanceRaiffeisen:
+				print(f'-- If you correct the starting balance, meaning correct the past months and find the {safeRound(startComputedDiff)} difference, the end balance would match')
 			else:
 				print(f'-- Even after applying the start difference of {startComputedDiff}, the balance don\'t match, something is wrong')
 else:
 	print(f'\n- Ending balances are matching, so far so good!')
 
-
-
+# -------------------------
+# Matching credits/debits
+# -------------------------
 print('\nMatching Raiffeisen credits to Abacus debits...')
 
 notFoundBankCredits = list()
-potentialEndBalanceCorrection = 0
+potentialEndBalanceCorrection = 0.0
 missingCreditsCount = 0
+
 for date, amounts in bankCredits.copy().items():
 	for amount in amounts:
-		#print(date, amount)
 		found = False
-		for abacusDate, abacusAmounts in abacusDebits.copy().items():
-			for abacusAmount in abacusAmounts.copy():
-				#print('-- ', abacusDate, abacusAmount)
+
+		# Match by date ONLY (default)
+		if date in abacusDebits:
+			for abacusAmount in abacusDebits[date].copy():
 				if amount == abacusAmount:
 					found = True
-					abacusDebits[abacusDate].remove(abacusAmount)
+					abacusDebits[date].remove(abacusAmount)
 					break
-			if found:
-				break
+
 		if not found:
 			print(f'- Raiffeisen credit of {amount} CHF on {date} not found in Abacus')
 			missingCreditsCount += 1
@@ -252,21 +296,22 @@ if missingCreditsCount > 0:
 if potentialEndBalanceCorrection > 0:
 	print(f'\n-- Applying potential correction, new end balance on Abacus: {round(endBalanceAbacus + potentialEndBalanceCorrection)}')
 
-
 print('\nMatching Raiffeisen debits to Abacus credits...')
 notFoundBankDebits = list()
 missingDebitsCount = 0
+
 for date, amounts in bankDebits.copy().items():
 	for amount in amounts:
 		found = False
-		for abacusDate, abacusAmounts in abacusCredits.copy().items():
-			for abacusAmount in abacusAmounts.copy():
+
+		# Match by date ONLY (default)
+		if date in abacusCredits:
+			for abacusAmount in abacusCredits[date].copy():
 				if amount == abacusAmount:
 					found = True
-					abacusCredits[abacusDate].remove(amount)
+					abacusCredits[date].remove(abacusAmount)
 					break
-			if found:
-				break
+
 		if not found:
 			print(f'- Raiffeisen debit of {amount} CHF on {date} not found in Abacus')
 			missingDebitsCount += 1
@@ -278,18 +323,19 @@ if missingDebitsCount > 0:
 
 newPotentialAbacusBalance = endBalanceAbacus
 if potentialEndBalanceCorrection != 0:
-	newPotentialAbacusBalance = round(endBalanceAbacus + potentialEndBalanceCorrection, 2)
+	newPotentialAbacusBalance = safeRound(endBalanceAbacus + potentialEndBalanceCorrection)
 	print(f'\n-- Applying potential correction, new end balance on Abacus: {newPotentialAbacusBalance}')
 	if newPotentialAbacusBalance == endBalanceRaiffeisen:
 		print('--- Correcting missing parts would fix the account and bring it to same level as the bank!')
 	else:
-		print("--- Applying corrections does not fix the account, there's something else...")
+		print('--- Applying corrections does not fix the account, there\'s something else...')
 
 print('\nThese entries are not matched to Raiffeisen entries')
-correction = 0
+correction = 0.0
 inverseAbacusCredits = list()
 inverseAbacusDebits = list()
 removeFromAbacus = list()
+
 print('- Credits')
 for date, listing in abacusCredits.items():
 	for amount in listing:
@@ -312,9 +358,13 @@ for date, listing in abacusDebits.items():
 
 if correction != 0:
 	print('\n-- Adding non matched credits and removing non matched debits...')
-	result = round(newPotentialAbacusBalance + correction, 2)
-	print(f'--- Calculated result on Abacus account: {result} {f"(should be {round(endBalanceRaiffeisen, 2)}, difference {round(result - endBalanceRaiffeisen, 2)})" if result != round(endBalanceRaiffeisen, 2) else "and that IS A MATCH, we rock!"}')
-	if result == round(endBalanceRaiffeisen, 2):
+	result = safeRound(newPotentialAbacusBalance + correction)
+	if result != safeRound(endBalanceRaiffeisen):
+		print(f'--- Calculated result on Abacus account: {result} (should be {safeRound(endBalanceRaiffeisen)}, difference {safeRound(result - endBalanceRaiffeisen)})')
+	else:
+		print(f'--- Calculated result on Abacus account: {result} and that IS A MATCH, we rock!')
+
+	if result == safeRound(endBalanceRaiffeisen):
 		print('---- To fix the balances you should:')
 		if missingDebitsCount > 0:
 			print(f'----- Apply the {missingDebitsCount} missing debits')
